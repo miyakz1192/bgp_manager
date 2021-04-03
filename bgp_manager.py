@@ -23,15 +23,9 @@ class VyOS:
 
         self.agent_file_name="bgp_manager_agent.py"
 
-    def connect(self):
-        self.connection_vyos = Netmiko(**self.remote_device_vyos)
+    def send_agent(self):
         self.connection_scp  = Netmiko(**self.remote_device_scp)
 
-    def disconnect(self):
-        self.connection_vyos.disconnect()
-        self.connection_scp.disconnect()
-
-    def send_agent(self):
         source_file=self.agent_file_name
         dest_file=source_file
         file_system="/home/" + self.username + "/"
@@ -43,7 +37,10 @@ class VyOS:
                       direction=direction,
                       overwrite_file=True)
 
+        self.connection_scp.disconnect()
+
     def _max_tunnel_device_index(self):
+        self.connection_vyos = Netmiko(**self.remote_device_vyos)
         connection = self.connection_vyos
         output = connection.send_command("python3 ./bgp_manager_agent.py")
         
@@ -53,6 +50,7 @@ class VyOS:
                 dev_num = int(dev[3:])
                 if max_num < dev_num:
                     max_num = dev_num
+        self.connection_vyos.disconnect()
         return max_num
 
     def _input_yes_or_no(self):
@@ -70,7 +68,9 @@ class VyOS:
             tun = self._create_tunnel_gre()
         bgp = self._create_bgp()
         print("configurations")
-        for conf in tun + bgp:
+
+        commands = tun + bgp
+        for conf in commands:
             print(conf)
 
         if self.args.yes_to_all == False:
@@ -78,6 +78,21 @@ class VyOS:
                 print("executing is quitted")
                 return
         print("executing commands to VyOS")
+
+        self.connection_vyos = Netmiko(**self.remote_device_vyos)
+
+        output = self.connection_vyos.config_mode()
+        print(output)
+        for conf in commands:
+            print(conf)
+            output = self.connection_vyos.send_command(conf)
+            print(output)
+        output = self.connection_vyos.commit()
+        print(output)
+        output = self.connection_vyos.send_command("save")
+        print(output)
+        self.connection_vyos.disconnect()
+
         return
 
 
@@ -155,12 +170,27 @@ def main():
               "key_file":os.environ["BGP_MANAGER_DEVICE_KEY_FILE"]}
     
     vyos = VyOS(args, **kwargs)
-    vyos.connect()
     
     vyos.send_agent()
     vyos.create_tunnel_and_bgp()
+
+
+def test():
+    kwargs = {"username": os.environ["BGP_MANAGER_DEVICE_USER_NAME"],
+              "ip": os.environ["BGP_MANAGER_DEVICE_IP"],
+              "password": os.environ["BGP_MANAGER_DEVICE_PASSWD"],
+              "key_file":os.environ["BGP_MANAGER_DEVICE_KEY_FILE"],
+              "device_type": "vyos",
+              "use_keys": True}
+
+    con = Netmiko(**kwargs)
+
+    res = con.send_command("show ipv6 route")
+    print(res)
+
+    con.disconnect()
+
     
-    vyos.disconnect()
 
 if __name__ == "__main__":
     main()
